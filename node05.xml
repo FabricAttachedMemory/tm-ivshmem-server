@@ -94,7 +94,7 @@
     <qemu:arg value='-chardev'/>
     <qemu:arg value='socket,path=/tmp/jfdi,id=jfdi'/>
     <qemu:arg value='-device'/>
-    <qemu:arg value='ivshmem,chardev=jfdi,size=1m'/>
+    <qemu:arg value='ivshmem,chardev=jfdi,size=32G'/>
   </qemu:commandline>
 </domain>
 

@@ -26,12 +26,13 @@
 typedef struct server_state {
     vmguest_t *live_vms;
     int nr_allocated_vms;
-    int shm_size;
+    long shm_size;
     long live_count;
     long total_count;
     int shm_fd;
-    char * path;
+    char * sockpath;
     char * shmobj;
+    char * filepath;
     int maxfd, conn_socket;
     long msi_vectors;
 } server_state_t;
@@ -49,22 +50,39 @@ int main(int argc, char ** argv)
     fd_set readset;
     server_state_t * s;
 
-    s = (server_state_t *)calloc(1, sizeof(server_state_t));
+    s = calloc(1, sizeof(server_state_t));
 
     s->live_count = 0;
     s->total_count = 0;
     parse_args(argc, argv, s);
 
-    /* open shared memory file  */
-    if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, S_IRWXU)) < 0)
-    {
-        fprintf(stderr, "kvm_ivshmem: could not open shared file\n");
-        exit(-1);
+    if (s->shmobj && s->filepath) {
+    	fprintf(stderr, "Need exactly one of -f | -s\n");
+	usage(argv[0]);
+	exit(3);
+    }
+
+    /* open shared memory object or normal file */
+    umask(0);
+    if (s->shmobj) {
+    	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, 0666)) < 0)
+    	{
+            fprintf(stderr, "shm_open(%s) failed: %s\n",
+	    	s->shmobj, strerror(errno));
+            exit(-1);
+    	}
+    } else if (s->filepath) {	// but keep using shm_fd
+    	if ((s->shm_fd = open(s->filepath, O_CREAT|O_RDWR, 0666)) < 0)
+    	{
+            fprintf(stderr, "open(%s) failed: %s\n",
+	    	s->filepath, strerror(errno));
+            exit(-1);
+    	}
     }
 
     ftruncate(s->shm_fd, s->shm_size);
 
-    s->conn_socket = create_listening_socket(s->path);
+    s->conn_socket = create_listening_socket(s->sockpath);
 
     s->maxfd = s->conn_socket;
 
@@ -190,7 +208,7 @@ void add_new_guest(server_state_t * s) {
 
     s->live_vms[new_posn].posn = new_posn;
     printf("[NC] Live_vms[%ld]\n", new_posn);
-    s->live_vms[new_posn].efd = (int *) malloc(sizeof(int));
+    s->live_vms[new_posn].efd = malloc(sizeof(int));
     for (i = 0; i < s->msi_vectors; i++) {
         s->live_vms[new_posn].efd[i] = eventfd(0, 0);
         printf("\tefd[%ld] = %d\n", i, s->live_vms[new_posn].efd[i]);
@@ -254,16 +272,20 @@ void parse_args(int argc, char **argv, server_state_t * s) {
     int c;
 
     s->shm_size = 1024 * 1024; // default shm_size
-    s->path = NULL;
+    s->sockpath = NULL;
     s->shmobj = NULL;
     s->msi_vectors = 1;
 
-	while ((c = getopt(argc, argv, "hp:s:m:n:")) != -1) {
+	while ((c = getopt(argc, argv, "f:hp:s:m:n:")) != -1) {
 
         switch (c) {
             // path to listening socket
             case 'p':
-                s->path = optarg;
+                s->sockpath = optarg;
+                break;
+            // name of file
+            case 'f':
+                s->filepath = optarg;
                 break;
             // name of shared memory object
             case 's':
@@ -299,18 +321,18 @@ void parse_args(int argc, char **argv, server_state_t * s) {
 		}
 	}
 
-    if (s->path == NULL) {
-        s->path = strdup(DEFAULT_SOCK_PATH);
+    if (s->sockpath == NULL) {
+        s->sockpath = strdup(DEFAULT_SOCK_PATH);
     }
 
-    printf("listening socket: %s\n", s->path);
+    printf("listening socket: %s\n", s->sockpath);
 
-    if (s->shmobj == NULL) {
+    if (!(s->shmobj || s->filepath)) {
         s->shmobj = strdup(DEFAULT_SHM_OBJ);
     }
 
-    printf("shared object: %s\n", s->shmobj);
-    printf("shared object size: %d (bytes)\n", s->shm_size);
+    printf("shared object: %s\n", s->shmobj ? s->shmobj : s->filepath);
+    printf("shared object size: %lu (bytes)\n", s->shm_size);
 
 }
 
@@ -348,7 +370,7 @@ int find_set(fd_set * readset, int max) {
 }
 
 void usage(char const *prg) {
-	fprintf(stderr, "use: %s [-h]  [-p <unix socket>] [-s <shm obj>] "
+	fprintf(stderr, "use: %s [-h]  [-p <unix socket>] [-f <file> | -s <shm obj>] "
             "[-m <size in MB>] [-n <# of MSI vectors>]\n", prg);
 }
 
