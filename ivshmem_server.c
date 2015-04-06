@@ -16,6 +16,8 @@
 #include <sys/select.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
+#include <sys/signalfd.h>
 #include "send_scm.h"
 
 #define DEFAULT_SOCK_PATH "/tmp/ivshmem_socket"
@@ -35,6 +37,7 @@ typedef struct server_state {
     char * filepath;
     int maxfd, conn_socket;
     long msi_vectors;
+    int sigfd;
 } server_state_t;
 
 void usage(char const *prg);
@@ -52,8 +55,6 @@ int main(int argc, char ** argv)
 
     s = calloc(1, sizeof(server_state_t));
 
-    s->live_count = 0;
-    s->total_count = 0;
     parse_args(argc, argv, s);
 
     if (s->shmobj && s->filepath) {
@@ -64,7 +65,7 @@ int main(int argc, char ** argv)
 
     /* open shared memory object or normal file */
     umask(0);
-    if (s->shmobj) {
+    if (s->shmobj) {		// System preserves file on graceless exit
     	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, 0666)) < 0)
     	{
             fprintf(stderr, "shm_open(%s) failed: %s\n",
@@ -72,12 +73,26 @@ int main(int argc, char ** argv)
             exit(-1);
     	}
     } else if (s->filepath) {	// but keep using shm_fd
+	sigset_t mask;
+
     	if ((s->shm_fd = open(s->filepath, O_CREAT|O_RDWR, 0666)) < 0)
     	{
             fprintf(stderr, "open(%s) failed: %s\n",
 	    	s->filepath, strerror(errno));
             exit(-1);
     	}
+
+	// from the man page example
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
+	    perror("sigprocmask");
+	else {
+	    if ((s->sigfd = signalfd(-1, &mask, 0)) == -1)
+	    	perror("sigprocmask");
+	    }
     }
 
     ftruncate(s->shm_fd, s->shm_size);
@@ -100,8 +115,10 @@ int main(int argc, char ** argv)
                 FD_SET(s->live_vms[i].sockfd, &readset);
             }
         }
+        if (s->sigfd >= 0)
+		FD_SET(s->sigfd, &readset);
 
-        printf("\nWaiting (maxfd = %d)\n", s->maxfd);
+        printf("\nPID %d waiting (maxfd = %d)\n", getpid(), s->maxfd);
 
         ret = select(s->maxfd + 1, &readset, NULL, NULL, NULL);
 
@@ -111,6 +128,31 @@ int main(int argc, char ** argv)
 
         handle = find_set(&readset, s->maxfd + 1);
         if (handle == -1) continue;
+
+	if (handle == s->sigfd) {	// a read will clear the signal
+		struct signalfd_siginfo fdsi;
+
+		if (read(s->sigfd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
+			perror("read sigfd");
+			exit(4);
+		}
+		switch(fdsi.ssi_signo) {
+		case SIGHUP:
+			printf("HUP\n");
+			break;
+		case SIGINT:
+		case SIGQUIT:
+			printf("INT or QUIT\n"); // Like Ctrl-C
+			close(s->sigfd);
+			close(s->shm_fd);
+			exit(0);
+			break;
+		default:
+			printf("WTF\n");	// shouldn't happen :-)
+			break;
+		}
+		continue;
+	}
 
         if (handle == s->conn_socket) {
 
@@ -137,7 +179,7 @@ int main(int argc, char ** argv)
 
             printf("[DC] recv returned %d\n", recv_ret);
 
-            /* find the dead VM in our list and move it do the dead list. */
+            /* find the dead VM in our list and move it to the dead list. */
             for (i = 0; i < s->total_count; i++) {
                 if (s->live_vms[i].sockfd == handle) {
                     deadposn = i;
@@ -271,10 +313,10 @@ void parse_args(int argc, char **argv, server_state_t * s) {
 
     int c;
 
+    memset(s, 0, sizeof(server_state_t));
     s->shm_size = 1024 * 1024; // default shm_size
-    s->sockpath = NULL;
-    s->shmobj = NULL;
     s->msi_vectors = 1;
+    s->sigfd = -1;
 
 	while ((c = getopt(argc, argv, "f:hp:s:m:n:")) != -1) {
 
@@ -364,7 +406,10 @@ int find_set(fd_set * readset, int max) {
         }
     }
 
+#if DEBUG
     printf("nothing set\n");
+#endif
+
     return -1;
 
 }
