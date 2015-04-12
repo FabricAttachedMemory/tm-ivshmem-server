@@ -60,7 +60,23 @@ int main(int argc, char ** argv)
     if (s->shmobj && s->filepath) {
     	fprintf(stderr, "Need exactly one of -f | -s\n");
 	usage(argv[0]);
-	exit(3);
+	exit(1);
+    }
+
+    // At 1TB, lspci -> Region 2: Memory at <ignored> (64-bit, prefetchable)
+    // at least on an i440 model machine.  512G takes at least a 9 or 10G RAM
+    // VM to hotadd (struct page and vmemmap)
+    if (1 << 20 > s->shm_size || s->shm_size > 512L * (1L << 30)) {
+    	fprintf(stderr, "Limits: 1M <= size <= 512G\n");
+	usage(argv[0]);
+	exit(1);
+    }
+
+    // Must be power of 2 (ie, only 1 bit may be set)
+    if (!(!(s->shm_size & (s->shm_size - 1)))) {
+    	fprintf(stderr, "%lu is not a power of 2\n", s->shm_size);
+	usage(argv[0]);
+	exit(1);
     }
 
     /* open shared memory object or normal file */
@@ -415,7 +431,9 @@ int find_set(fd_set * readset, int max) {
 }
 
 void usage(char const *prg) {
-	fprintf(stderr, "use: %s [-h]  [-p <unix socket>] [-f <file> | -s <shm obj>] "
-            "[-m <size in MB>] [-n <# of MSI vectors>]\n", prg);
+    fprintf(stderr,
+    	    "usage: %s [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
+            "[-m [mMgG]] [-n <# of MSI vectors>]\n",
+	    prg);
 }
 
