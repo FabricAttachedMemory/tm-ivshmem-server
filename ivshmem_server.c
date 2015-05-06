@@ -42,39 +42,22 @@ typedef struct server_state {
     bool daemonize, truncate;
 } server_state_t;
 
-void usage(char const *prg);
-int find_set(fd_set * readset, int max);
-void print_vec(server_state_t * s, const char * c);
+void usage(char const *prg) {
+    fprintf(stderr,
+    	    "usage: %s [-d] [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
+            "[-m XXXX[MG]] [-n X] [-t]\n",
+	    prg);
+    fprintf(stderr, "-d		daemonize\n");
+    fprintf(stderr, "-h		help\n");
+    fprintf(stderr, "-f	path	use normal file as backing store\n");
+    fprintf(stderr, "-m XXXX	size of backing store (multipliers: MG)\n");
+    fprintf(stderr, "-n X	number of MSI vectors\n");
+    fprintf(stderr, "-s	name	use Posix shared memory as backing store\n");
+    fprintf(stderr, "-t		with -f and -m: truncate file to size\n");
 
-server_state_t * parse_args(int argc, char **argv);
-void add_new_guest(server_state_t * s);
-void create_listening_socket(server_state_t * s);
-void open_backing_store(server_state_t * s);
-void do_server(server_state_t * s);
-
-int main(int argc, char ** argv)
-{
-    server_state_t * s;
-
-    // All of these setup routines may exit with an error.
-
-    s = parse_args(argc, argv);
-
-    open_backing_store(s);
-
-    if (s->daemonize) {
-    	printf("PID is %d\n", getpid());
-    	if (daemon(false, false) == -1)
-		perror("daemon() failed");
-    }
-
-    do_server(s);
-
-    return 0;
 }
 
 void add_new_guest(server_state_t * s) {
-
     struct sockaddr_un remote;
     socklen_t t = sizeof(remote);
     long i, j;
@@ -305,21 +288,6 @@ int find_set(fd_set * readset, int max) {
 
 }
 
-void usage(char const *prg) {
-    fprintf(stderr,
-    	    "usage: %s [-d] [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
-            "[-m XXXX[MG]] [-n X] [-t]\n",
-	    prg);
-    fprintf(stderr, "-d		daemonize\n");
-    fprintf(stderr, "-h		help\n");
-    fprintf(stderr, "-f	path	use normal file as backing store\n");
-    fprintf(stderr, "-m XXXX	size of backing store (multipliers: MG)\n");
-    fprintf(stderr, "-n X	number of MSI vectors\n");
-    fprintf(stderr, "-s	name	use Posix shared memory as backing store\n");
-    fprintf(stderr, "-t		with -f and -m: truncate file to size\n");
-
-}
-
 /* open shared memory object or normal file */
 
 void open_backing_store(server_state_t *s) {
@@ -492,4 +460,25 @@ void do_server(server_state_t * s) {
         }
 
     }
+}
+
+int main(int argc, char ** argv) {
+    server_state_t * s;
+
+    // All of these setup routines may exit with an error.
+
+    s = parse_args(argc, argv);
+    
+    create_listening_socket(s);
+
+    open_backing_store(s);
+
+    if (s->daemonize) {
+    	if (daemon(false, false) == -1)
+		perror("daemon() failed");
+    }
+
+    do_server(s);
+
+    return 0;
 }
