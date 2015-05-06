@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <sys/signalfd.h>
+#include <stdbool.h>
 #include "send_scm.h"
 
 #define DEFAULT_SOCK_PATH "/tmp/ivshmem_socket"
@@ -38,84 +39,34 @@ typedef struct server_state {
     int maxfd, conn_socket;
     long msi_vectors;
     int sigfd;
+    bool daemonize, truncate;
 } server_state_t;
 
 void usage(char const *prg);
 int find_set(fd_set * readset, int max);
 void print_vec(server_state_t * s, const char * c);
 
+server_state_t * parse_args(int argc, char **argv);
 void add_new_guest(server_state_t * s);
-void parse_args(int argc, char **argv, server_state_t * s);
-int create_listening_socket(char * path);
+void create_listening_socket(server_state_t * s);
+void open_backing_store(server_state_t * s);
 
 int main(int argc, char ** argv)
 {
     fd_set readset;
     server_state_t * s;
 
-    s = calloc(1, sizeof(server_state_t));
+    // All of these setup routines may exit with an error.
 
-    parse_args(argc, argv, s);
+    s = parse_args(argc, argv);
 
-    if (s->shmobj && s->filepath) {
-    	fprintf(stderr, "Need exactly one of -f | -s\n");
-	usage(argv[0]);
-	exit(1);
+    open_backing_store(s);
+
+    if (s->daemonize) {
+    	printf("PID is %d\n", getpid());
+    	if (daemon(false, false) == -1)
+		perror("daemon() failed");
     }
-
-    // At 1TB, lspci -> Region 2: Memory at <ignored> (64-bit, prefetchable)
-    // at least on an i440 model machine.  512G takes at least a 9 or 10G RAM
-    // VM to hotadd (struct page and vmemmap)
-    if (1 << 20 > s->shm_size || s->shm_size > 512L * (1L << 30)) {
-    	fprintf(stderr, "Limits: 1M <= size <= 512G\n");
-	usage(argv[0]);
-	exit(1);
-    }
-
-    // Must be power of 2 (ie, only 1 bit may be set)
-    if (!(!(s->shm_size & (s->shm_size - 1)))) {
-    	fprintf(stderr, "%lu is not a power of 2\n", s->shm_size);
-	usage(argv[0]);
-	exit(1);
-    }
-
-    /* open shared memory object or normal file */
-    umask(0);
-    if (s->shmobj) {		// System preserves file on graceless exit
-    	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, 0666)) < 0)
-    	{
-            fprintf(stderr, "shm_open(%s) failed: %s\n",
-	    	s->shmobj, strerror(errno));
-            exit(-1);
-    	}
-    } else if (s->filepath) {	// but keep using shm_fd
-	sigset_t mask;
-
-    	if ((s->shm_fd = open(s->filepath, O_CREAT|O_RDWR, 0666)) < 0)
-    	{
-            fprintf(stderr, "open(%s) failed: %s\n",
-	    	s->filepath, strerror(errno));
-            exit(-1);
-    	}
-
-	// from the man page example
-	sigemptyset(&mask);
-	sigaddset(&mask, SIGHUP);
-	sigaddset(&mask, SIGINT);
-	sigaddset(&mask, SIGQUIT);
-	if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
-	    perror("sigprocmask");
-	else {
-	    if ((s->sigfd = signalfd(-1, &mask, 0)) == -1)
-	    	perror("sigprocmask");
-	    }
-    }
-
-    ftruncate(s->shm_fd, s->shm_size);
-
-    s->conn_socket = create_listening_socket(s->sockpath);
-
-    s->maxfd = s->conn_socket;
 
     for(;;) {
         int ret, handle, i;
@@ -297,101 +248,135 @@ void add_new_guest(server_state_t * s) {
     s->total_count++;
 }
 
-int create_listening_socket(char * path) {
+void create_listening_socket(server_state_t * s) {
 
     struct sockaddr_un local;
-    int len, conn_socket;
+    int len;
 
-    if ((conn_socket = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-        perror("socket");
+    if (s->sockpath == NULL)
+        s->sockpath = strdup(DEFAULT_SOCK_PATH);
+    printf("listening socket: %s\n", s->sockpath);
+
+    if ((s->conn_socket = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+        perror("socket() failed");
         exit(1);
     }
 
     local.sun_family = AF_UNIX;
-    strcpy(local.sun_path, path);
+    strcpy(local.sun_path, s->sockpath);
     unlink(local.sun_path);
     len = strlen(local.sun_path) + sizeof(local.sun_family);
-    if (bind(conn_socket, (struct sockaddr *)&local, len) == -1) {
-        perror("bind");
+    if (bind(s->conn_socket, (struct sockaddr *)&local, len) == -1) {
+        perror("bind() failed");
         exit(1);
     }
 
-    if (listen(conn_socket, 5) == -1) {
-        perror("listen");
+    if (listen(s->conn_socket, 5) == -1) {
+        perror("listen() failed");
         exit(1);
     }
+    s->maxfd = s->conn_socket;
 
-    return conn_socket;
+    return;
 
 }
 
-void parse_args(int argc, char **argv, server_state_t * s) {
-
+server_state_t * parse_args(int argc, char **argv) {
+    server_state_t * s;
     int c;
 
-    memset(s, 0, sizeof(server_state_t));
-    s->shm_size = 1024 * 1024; // default shm_size
+    if (!(s = calloc(1, sizeof(server_state_t)))) {
+    	perror("Cannot allocate memory");
+	exit(1);
+    }
     s->msi_vectors = 1;
     s->sigfd = -1;
 
-	while ((c = getopt(argc, argv, "f:hp:s:m:n:")) != -1) {
+    while ((c = getopt(argc, argv, "df:hp:s:m:n:t")) != -1) switch (c) {
+    
+    case 'd':			// daemonize (go into background)
+    	    s->daemonize = true;
+	    break;
 
-        switch (c) {
-            // path to listening socket
-            case 'p':
-                s->sockpath = optarg;
-                break;
-            // name of file
-            case 'f':
-                s->filepath = optarg;
-                break;
-            // name of shared memory object
-            case 's':
-                s->shmobj = optarg;
-                break;
-            // size of shared memory object
-            case 'm': {
-                    uint64_t value;
-                    char *ptr;
+    case 'f':			// name of file
+            s->filepath = optarg;
+            break;
 
-                    value = strtoul(optarg, &ptr, 10);
-                    switch (*ptr) {
-                    case 0: case 'M': case 'm':
-                        value <<= 20;
-                        break;
-                    case 'G': case 'g':
-                        value <<= 30;
-                        break;
-                    default:
-                        fprintf(stderr, "qemu: invalid ram size: %s\n", optarg);
-                        exit(1);
-                    }
-                    s->shm_size = value;
+    case 'h':
+    default:
+            usage(argv[0]);
+	    exit(1);
+
+    case 'm':			// size of shared memory object
+        {
+            uint64_t value;
+            char *ptr;
+
+            value = strtoul(optarg, &ptr, 10);
+            switch (*ptr) {
+
+            case 0: case 'M': case 'm':
+                    value <<= 20;
                     break;
-                }
-            case 'n':
-                s->msi_vectors = atol(optarg);
-                break;
-            case 'h':
+
+            case 'G': case 'g':
+                    value <<= 30;
+                    break;
+
             default:
-	            usage(argv[0]);
-		        exit(1);
-		}
-	}
+                    fprintf(stderr, "invalid multiplier: %s\n", optarg);
+		    usage(argv[0]);
+                    exit(1);
+            }
+            s->shm_size = value;
+            break;
+        }
 
-    if (s->sockpath == NULL) {
-        s->sockpath = strdup(DEFAULT_SOCK_PATH);
+    case 'n':			// number of MSI vectors
+            s->msi_vectors = atol(optarg);
+            break;
+
+    case 'p':			// path to listening socket
+            s->sockpath = optarg;
+            break;
+
+    case 's':			// name of shared memory object
+            s->shmobj = optarg;
+            break;
+
+    case 't':			// force file to size given by -m
+	    s->truncate = true;
+	    break;
+    }
+    
+    //Idiot checks
+
+    if (s->shmobj && s->filepath) {
+    	fprintf(stderr, "Need exactly one of -f | -s\n");
+	usage(argv[0]);
+	exit(1);
     }
 
-    printf("listening socket: %s\n", s->sockpath);
-
-    if (!(s->shmobj || s->filepath)) {
-        s->shmobj = strdup(DEFAULT_SHM_OBJ);
+    // At 1TB, lspci -> Region 2: Memory at <ignored> (64-bit, prefetchable)
+    // at least on an i440 model VM.  512G takes at least 9 or 10G RAM
+    // to hotadd (struct page and vmemmap)
+    if (s->shm_size && (
+    		1 << 20 > s->shm_size || s->shm_size > 512L * (1L << 30))) {
+    	fprintf(stderr, "Limits: 1M <= size <= 512G\n");
+	usage(argv[0]);
+	exit(1);
     }
 
-    printf("shared object: %s\n", s->shmobj ? s->shmobj : s->filepath);
-    printf("shared object size: %lu (bytes)\n", s->shm_size);
+#if 0
+    // Must be power of 2 (ie, only 1 bit may be set)
+    if (!(!(s->shm_size & (s->shm_size - 1)))) {
+    	fprintf(stderr, "%lu is not a power of 2\n", s->shm_size);
+	usage(argv[0]);
+	exit(1);
+    }
+#endif
 
+    return s;	// needs to be free'd
 }
 
 void print_vec(server_state_t * s, const char * c) {
@@ -432,8 +417,73 @@ int find_set(fd_set * readset, int max) {
 
 void usage(char const *prg) {
     fprintf(stderr,
-    	    "usage: %s [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
-            "[-m [mMgG]] [-n <# of MSI vectors>]\n",
+    	    "usage: %s [-d] [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
+            "[-m XXXX[MG]] [-n X] [-t]\n",
 	    prg);
+    fprintf(stderr, "-d		daemonize\n");
+    fprintf(stderr, "-h		help\n");
+    fprintf(stderr, "-f	path	use normal file as backing store\n");
+    fprintf(stderr, "-m XXXX	size of backing store (multipliers: MG)\n");
+    fprintf(stderr, "-n X	number of MSI vectors\n");
+    fprintf(stderr, "-s	name	use Posix shared memory as backing store\n");
+    fprintf(stderr, "-t		with -f and -m: truncate file to size\n");
+
 }
 
+/* open shared memory object or normal file */
+
+void open_backing_store(server_state_t *s) {
+    struct stat buf;
+
+    if (!(s->shmobj || s->filepath))
+        s->shmobj = strdup(DEFAULT_SHM_OBJ);
+
+    printf("shared object: %s\n", s->shmobj ? s->shmobj : s->filepath);
+    if (s->shm_size)
+    	printf("requested object size: %lu (bytes)\n", s->shm_size);
+   
+    umask(0);
+    if (s->shmobj) {		// System preserves file on graceless exit
+    	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, 0666)) < 0)
+    	{
+            fprintf(stderr, "shm_open(%s) failed: %s\n",
+	    	s->shmobj, strerror(errno));
+            exit(1);
+    	}
+    } else if (s->filepath) {	// but keep using shm_fd
+	sigset_t mask;
+
+    	if ((s->shm_fd = open(s->filepath, O_CREAT|O_RDWR, 0666)) < 0)
+    	{
+            fprintf(stderr, "open(%s) failed: %s\n",
+	    	s->filepath, strerror(errno));
+            exit(1);
+    	}
+
+	// from the man page example
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
+	    perror("sigprocmask() failed");
+	else {
+	    if ((s->sigfd = signalfd(-1, &mask, 0)) == -1)
+	    	perror("signalfd() failed");
+	    }
+    }
+
+    // deal with size
+    if (fstat(s->shm_fd, &buf) == -1) {
+    	perror("fstat() failed");
+	exit(1);
+    }
+    printf("backing store is %lu bytes\n", buf.st_size);
+
+    if (!s->shm_size) 
+    	s->shm_size = buf.st_size;
+    else if (s->truncate) {
+	    if (ftruncate(s->shm_fd, s->shm_size) == -1)
+		perror("ftruncate() failed");
+    }
+}
