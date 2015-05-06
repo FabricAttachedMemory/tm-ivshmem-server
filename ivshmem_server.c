@@ -50,10 +50,10 @@ server_state_t * parse_args(int argc, char **argv);
 void add_new_guest(server_state_t * s);
 void create_listening_socket(server_state_t * s);
 void open_backing_store(server_state_t * s);
+void do_server(server_state_t * s);
 
 int main(int argc, char ** argv)
 {
-    fd_set readset;
     server_state_t * s;
 
     // All of these setup routines may exit with an error.
@@ -68,117 +68,7 @@ int main(int argc, char ** argv)
 		perror("daemon() failed");
     }
 
-    for(;;) {
-        int ret, handle, i;
-        char buf[1024];
-
-        print_vec(s, "vm_sockets");
-
-        FD_ZERO(&readset);
-        /* conn socket is in Live_vms at posn 0 */
-        FD_SET(s->conn_socket, &readset);
-        for (i = 0; i < s->total_count; i++) {
-            if (s->live_vms[i].alive != 0) {
-                FD_SET(s->live_vms[i].sockfd, &readset);
-            }
-        }
-        if (s->sigfd >= 0)
-		FD_SET(s->sigfd, &readset);
-
-        printf("\nPID %d waiting (maxfd = %d)\n", getpid(), s->maxfd);
-
-        ret = select(s->maxfd + 1, &readset, NULL, NULL, NULL);
-
-        if (ret == -1) {
-            perror("select()");
-        }
-
-        handle = find_set(&readset, s->maxfd + 1);
-        if (handle == -1) continue;
-
-	if (handle == s->sigfd) {	// a read will clear the signal
-		struct signalfd_siginfo fdsi;
-
-		if (read(s->sigfd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
-			perror("read sigfd");
-			exit(4);
-		}
-		switch(fdsi.ssi_signo) {
-		case SIGHUP:
-			printf("HUP\n");
-			break;
-		case SIGINT:
-		case SIGQUIT:
-			printf("INT or QUIT\n"); // Like Ctrl-C
-			close(s->sigfd);
-			close(s->shm_fd);
-			exit(0);
-			break;
-		default:
-			printf("WTF\n");	// shouldn't happen :-)
-			break;
-		}
-		continue;
-	}
-
-        if (handle == s->conn_socket) {
-
-            printf("[NC] new connection\n");
-            FD_CLR(s->conn_socket, &readset);
-
-            /* The Total_count is equal to the new guests VM ID */
-            add_new_guest(s);
-
-            /* update our the maximum file descriptor number */
-            s->maxfd = s->live_vms[s->total_count - 1].sockfd > s->maxfd ?
-                            s->live_vms[s->total_count - 1].sockfd : s->maxfd;
-
-            s->live_count++;
-            printf("Live_count is %ld\n", s->live_count);
-
-        } else {
-            /* then we have received a disconnection */
-            int recv_ret;
-            long i, j;
-            long deadposn = -1;
-
-            recv_ret = recv(handle, buf, 1, 0);
-
-            printf("[DC] recv returned %d\n", recv_ret);
-
-            /* find the dead VM in our list and move it to the dead list. */
-            for (i = 0; i < s->total_count; i++) {
-                if (s->live_vms[i].sockfd == handle) {
-                    deadposn = i;
-                    s->live_vms[i].alive = 0;
-                    close(s->live_vms[i].sockfd);
-
-                    for (j = 0; j < s->msi_vectors; j++) {
-                        close(s->live_vms[i].efd[j]);
-                    }
-
-                    free(s->live_vms[i].efd);
-                    s->live_vms[i].sockfd = -1;
-                    break;
-                }
-            }
-
-            for (j = 0; j < s->total_count; j++) {
-                /* update remaining clients that one client has left/died */
-                if (s->live_vms[j].alive) {
-                    printf("[UD] sending kill of fd[%ld] to %ld\n",
-                                                                deadposn, j);
-                    sendKill(s->live_vms[j].sockfd, deadposn, sizeof(deadposn));
-                }
-            }
-
-            s->live_count--;
-
-            /* close the socket for the departed VM */
-            close(handle);
-        }
-
-    }
+    do_server(s);
 
     return 0;
 }
@@ -485,5 +375,121 @@ void open_backing_store(server_state_t *s) {
     else if (s->truncate) {
 	    if (ftruncate(s->shm_fd, s->shm_size) == -1)
 		perror("ftruncate() failed");
+    }
+}
+
+void do_server(server_state_t * s) {
+    fd_set readset;
+    int ret, handle, i;
+    char buf[1024];
+
+    for(;;) {
+
+        print_vec(s, "vm_sockets");
+
+        FD_ZERO(&readset);
+        /* conn socket is in Live_vms at posn 0 */
+        FD_SET(s->conn_socket, &readset);
+        for (i = 0; i < s->total_count; i++) {
+            if (s->live_vms[i].alive != 0) {
+                FD_SET(s->live_vms[i].sockfd, &readset);
+            }
+        }
+        if (s->sigfd >= 0)
+		FD_SET(s->sigfd, &readset);
+
+        printf("\nPID %d waiting (maxfd = %d)\n", getpid(), s->maxfd);
+
+        ret = select(s->maxfd + 1, &readset, NULL, NULL, NULL);
+
+        if (ret == -1) {
+            perror("select()");
+        }
+
+        handle = find_set(&readset, s->maxfd + 1);
+        if (handle == -1) continue;
+
+	if (handle == s->sigfd) {	// a read will clear the signal
+		struct signalfd_siginfo fdsi;
+
+		if (read(s->sigfd, &fdsi, sizeof(fdsi)) != sizeof(fdsi)) {
+			perror("read sigfd");
+			exit(4);
+		}
+		switch(fdsi.ssi_signo) {
+		case SIGHUP:
+			printf("HUP\n");
+			break;
+		case SIGINT:
+		case SIGQUIT:
+			printf("INT or QUIT\n"); // Like Ctrl-C
+			close(s->sigfd);
+			close(s->shm_fd);
+			exit(0);
+			break;
+		default:
+			printf("WTF\n");	// shouldn't happen :-)
+			break;
+		}
+		continue;
+	}
+
+        if (handle == s->conn_socket) {
+
+            printf("[NC] new connection\n");
+            FD_CLR(s->conn_socket, &readset);
+
+            /* The Total_count is equal to the new guests VM ID */
+            add_new_guest(s);
+
+            /* update our the maximum file descriptor number */
+            s->maxfd = s->live_vms[s->total_count - 1].sockfd > s->maxfd ?
+                            s->live_vms[s->total_count - 1].sockfd : s->maxfd;
+
+            s->live_count++;
+            printf("Live_count is %ld\n", s->live_count);
+
+        } else {
+            /* then we have received a disconnection */
+            int recv_ret;
+            long i, j;
+            long deadposn = -1;
+
+            recv_ret = recv(handle, buf, 1, 0);
+
+            printf("[DC] recv returned %d\n", recv_ret);
+
+            /* find the dead VM in our list and move it to the dead list. */
+            for (i = 0; i < s->total_count; i++) {
+                if (s->live_vms[i].sockfd == handle) {
+                    deadposn = i;
+                    s->live_vms[i].alive = 0;
+                    close(s->live_vms[i].sockfd);
+
+                    for (j = 0; j < s->msi_vectors; j++) {
+                        close(s->live_vms[i].efd[j]);
+                    }
+
+                    free(s->live_vms[i].efd);
+                    s->live_vms[i].sockfd = -1;
+                    break;
+                }
+            }
+
+            for (j = 0; j < s->total_count; j++) {
+                /* update remaining clients that one client has left/died */
+                if (s->live_vms[j].alive) {
+                    printf("[UD] sending kill of fd[%ld] to %ld\n",
+                                                                deadposn, j);
+                    sendKill(s->live_vms[j].sockfd, deadposn, sizeof(deadposn));
+                }
+            }
+
+            s->live_count--;
+
+            /* close the socket for the departed VM */
+            close(handle);
+        }
+
     }
 }
