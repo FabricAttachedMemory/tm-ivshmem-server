@@ -13,19 +13,38 @@ to display the options run:
 Options
 -------
 
-    -h  print help message
+    -d	
+    	daemonize (instead of running in the foreground)
+
+    -h  
+    	print help message
+
+    -f	<path on host>
+    	Absolute pathname of a file to be used as true persistent backing store,
+	as opposed to a shared memory object that disappears on a reboot.
+
+    -m <#>
+        size of the backing store in MBs (default: 1).  Multipliers are M, G, and T.
+	Optional if you're just reusing an existing object.
+	Shared memory objects are limited to half the size of your physical RAM.
+	Normal files can be up to several terabytes, depending on your host
+	processor and revision of QEMU.
+
+    -n <#>
+    	Number of MSI pseudo-interrupts to use in IV messaging.  Not germaine to
+	shared pseudo-NVM.
 
     -p <path on host>
-        unix socket to listen on.  The qemu-kvm chardev needs to connect on
+        Unix domain socket to listen on.  The qemu-kvm chardev needs to connect on
         this socket. (default: '/tmp/ivshmem_socket')
 
     -s <string>
         POSIX shared object to create that is the shared memory (default: 'ivshmem')
 
-    -m <#>
-        size of the POSIX object in MBs (default: 1)
-
     -n <#>
         number of eventfds for each guest.  This number must match the
         'vectors' argument passed the ivshmem device. (default: 1)
+
+   -t
+   	Truncate the object to the (new) size given in -m.
 
