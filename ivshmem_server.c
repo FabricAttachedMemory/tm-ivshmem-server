@@ -45,12 +45,12 @@ typedef struct server_state {
 void usage(char const *prg) {
     fprintf(stderr,
     	    "usage: %s [-d] [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
-            "[-m XXXX[MG]] [-n X] [-t]\n",
+            "[-m XXXX[M|G|T]] [-n X] [-t]\n",
 	    prg);
     fprintf(stderr, "-d		daemonize\n");
     fprintf(stderr, "-h		help\n");
     fprintf(stderr, "-f	path	use normal file as backing store\n");
-    fprintf(stderr, "-m XXXX	size of backing store (multipliers: MG)\n");
+    fprintf(stderr, "-m XXXX	size of backing store\n");
     fprintf(stderr, "-n X	number of MSI vectors\n");
     fprintf(stderr, "-s	name	use Posix shared memory as backing store\n");
     fprintf(stderr, "-t		with -f and -m: truncate file to given size\n");
@@ -241,8 +241,8 @@ server_state_t * parse_args(int argc, char **argv) {
     // 40-bit addressing (> mmap() max of 512G).
 
     if (s->shm_size && (
-    		1 << 20 > s->shm_size || s->shm_size > 2L * (1L << 40))) {
-    	fprintf(stderr, "Limits: 1M <= size <= 2T\n");
+    		1 << 20 > s->shm_size || s->shm_size > 16L * (1L << 40))) {
+    	fprintf(stderr, "Limits: 1M <= size <= 16T\n");
 	usage(argv[0]);
 	exit(1);
     }
