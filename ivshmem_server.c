@@ -53,7 +53,7 @@ void usage(char const *prg) {
     fprintf(stderr, "-m XXXX	size of backing store (multipliers: MG)\n");
     fprintf(stderr, "-n X	number of MSI vectors\n");
     fprintf(stderr, "-s	name	use Posix shared memory as backing store\n");
-    fprintf(stderr, "-t		with -f and -m: truncate file to size\n");
+    fprintf(stderr, "-t		with -f and -m: truncate file to given size\n");
 
 }
 
@@ -148,6 +148,7 @@ void create_listening_socket(server_state_t * s) {
         perror("listen() failed");
         exit(1);
     }
+    chmod(local.sun_path, 0666);
     s->maxfd = s->conn_socket;
 
     return;
@@ -196,6 +197,10 @@ server_state_t * parse_args(int argc, char **argv) {
                     value <<= 30;
                     break;
 
+            case 'T': case 't':
+                    value <<= 40;
+                    break;
+
             default:
                     fprintf(stderr, "invalid multiplier: %s\n", optarg);
 		    usage(argv[0]);
@@ -232,10 +237,12 @@ server_state_t * parse_args(int argc, char **argv) {
 
     // At 1TB, lspci -> Region 2: Memory at <ignored> (64-bit, prefetchable)
     // at least on an i440 model VM.  512G takes at least 9 or 10G RAM
-    // to hotadd (struct page and vmemmap)
+    // to hotadd (struct page and vmemmap).  QEMU needs patch to go beyond
+    // 40-bit addressing (> mmap() max of 512G).
+
     if (s->shm_size && (
-    		1 << 20 > s->shm_size || s->shm_size > 512L * (1L << 30))) {
-    	fprintf(stderr, "Limits: 1M <= size <= 512G\n");
+    		1 << 20 > s->shm_size || s->shm_size > 2L * (1L << 40))) {
+    	fprintf(stderr, "Limits: 1M <= size <= 2T\n");
 	usage(argv[0]);
 	exit(1);
     }
@@ -292,6 +299,7 @@ int find_set(fd_set * readset, int max) {
 
 void open_backing_store(server_state_t *s) {
     struct stat buf;
+    mode_t umask_old;
 
     if (!(s->shmobj || s->filepath))
         s->shmobj = strdup(DEFAULT_SHM_OBJ);
@@ -300,7 +308,7 @@ void open_backing_store(server_state_t *s) {
     if (s->shm_size)
     	printf("requested object size: %lu (bytes)\n", s->shm_size);
    
-    umask(0);
+    umask_old = umask(0);
     if (s->shmobj) {		// System preserves file on graceless exit
     	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, 0666)) < 0)
     	{
@@ -336,14 +344,21 @@ void open_backing_store(server_state_t *s) {
     	perror("fstat() failed");
 	exit(1);
     }
-    printf("backing store is %lu bytes\n", buf.st_size);
 
     if (!s->shm_size) 
     	s->shm_size = buf.st_size;
     else if (s->truncate) {
 	    if (ftruncate(s->shm_fd, s->shm_size) == -1)
 		perror("ftruncate() failed");
+    	    if (fstat(s->shm_fd, &buf) == -1) {
+    		perror("fstat() failed");
+		exit(1);
+    	    }
     }
+
+    printf("backing store is %lu bytes\n", buf.st_size);
+
+    umask(umask_old);
 }
 
 void do_server(server_state_t * s) {
