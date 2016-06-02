@@ -41,22 +41,22 @@ to display the options run:
     	daemonize (instead of running in the foreground)
 
     -h  
-    	print help message
+        print help message
 
     -f	<path on host>
     	Absolute pathname of a file to be used as true persistent backing store,
-	as opposed to a shared memory object that disappears on a reboot.
+        as opposed to a shared memory object that disappears on a reboot.
 
     -m <#>
         size of the backing store in MBs (default: 1).  Multipliers are M, G, and T.
-	Optional if you're just reusing an existing object.
-	Shared memory objects are limited to half the size of your physical RAM.
-	Normal files can be up to several terabytes, depending on your host
-	processor, revision of QEMU (1.9 - 2.4), and available file system space.
+        Optional if you're just reusing an existing object.
+        Shared memory objects are limited to half the size of your physical RAM.
+        Normal files can be up to several terabytes, depending on your host
+        processor, revision of QEMU (1.9 - 2.4), and available file system space.
 
     -n <#>
-    	Number of MSI pseudo-interrupts to use in IV messaging.  Not germane to
-	shared pseudo-NVM.
+        Number of MSI pseudo-interrupts to use in IV messaging.  Not germane to
+        shared pseudo-NVM.
 
     -p <path on host>
         Unix domain socket to listen on.  The qemu-kvm chardev needs to connect on
@@ -76,9 +76,9 @@ Fabric-Attached Memory Emulation is achieved via the stanza
 
     -device ivshmem,shm=fabric_emulation,size=1024
     
-Naturally, connecting to tm_ivshmem_server is a little more difficult.  QEMU needs the UNIX-domain socket and the size used by tm_ivshmem_server (-p and -m options).  As a QEMU invocation stanza, that becomes
+Naturally, connecting to tm_ivshmem_server is a little more difficult.  QEMU needs the UNIX-domain socket and the size used by tm_ivshmem_server (-p and -m options).  The QEMU invocation stanza comes as two parts:
 
-    
+    -chardev socket,path=/var/run/ivshmem.sock,id=GlobalNVM -device ivshmem,chardev=GlobalNVM,size=64G 
 
 ## Files
 
