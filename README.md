@@ -67,3 +67,15 @@ to display the options run:
 
     -t
         Truncate the object to the (new) size given in -m.
+
+## Files
+
+| Filename | Description |
+|----------|-------------|
+| COPYING | License file (GPLv2) |
+| Makefile | The usual suspect |
+| node05.xml.file | The output from "virsh dumpxml" for a VM named node05.
+This guest is configured to use the regular file mode of IVSHMEM and needs tm__ivshmem_server running first. |
+| send_scm.[ch] | Support routines for delivering messages across the socket | 
+| tm_ivshmem_server.c | The core of the server, all mods are in here |
+
