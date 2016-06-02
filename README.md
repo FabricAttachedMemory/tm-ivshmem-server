@@ -7,9 +7,15 @@ in memory-centric computing.  While the hardware won't be available until 2016, 
 ## Description
 
 This repo delivers a server that extends
-[Fabric-Attached Memory Emulation discussed at](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo,
-[particularly IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines)
+[Fabric-Attached Memory Emulation](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo, [particularly  IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines)
 is strongly recommended.
+
+This server was originally written by Cam McDonnell as part of a larger exerciser suite for IVSHMEM.  It's currently [hosted on Github[(https://github.com/cmacdonell/ivshmem-code/).  The Machine effort only uses the ivshmem-server branch of that repo, and that's what you see here.
+
+[The original ivshmem-server](https://github.com/cmacdonell/ivshmem-code/tree/master/ivshmem-server) communicates with a VM guest as directed by qemu command line options.  The server passed an open file descriptor representing a memory object, usually just a pre-allocated POSIX shared memory object.   tm-ivshmem-server (this repo) extends that by allowing a regular file to be used as backing store for the common IVSHMEM.  This allows two things:
+
+* True persistence of emulated global NVM (ie, power off of a laptop loses /dev/shm contents)
+* Backing store limited only by available file system space (instead of 1/2 physical RAM).
 
 The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a shared, global memory space.  This space can be accessed via mmap(2) and will behave just the the memory centric-computing on The Machine.
 
