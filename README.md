@@ -1,14 +1,15 @@
 # BETTER Emulation of Fabric-Attached Memory for The Machine
 
-Experience the developer environment of next year's hardware _today_.  The Machine from Hewlett Packard Enterprise 
-prototype offers a new paradigm in memory-centric computing.  While the hardware won't be available until 2016, 
-you can experiment with fabric-attached memory right now.
+Experience the developer environment of next year's hardware _today_.  
+The Machine from Hewlett Packard Enterprise prototype offers a new paradigm
+in memory-centric computing.  While the hardware won't be available until 2016, you can experiment with fabric-attached memory right now.
 
 ## Description
 
-This repo delivers a script to create virtual machine file system images directly from a Debian repo.  VMs are then customized and configured to emulate the fabric-attached memory of The Machine.  Those statements should make much more sense after [reading the background material on the wiki.](https://github.com/FabricAttachedMemory/Emulation/wiki)
-
-Fabric-Attached Memory Emulation is an environment that can be used to explore the new architectural paradigm of The Machine.  Some knowledge of The Machine architecture is useful to use this suite, but it actually ignores the minutiae of the hardware.  Reasonable fluency with the QEMU/KVM/libvirt/virsh suite is highly recommended.
+This repo delivers a server that extends
+[Fabric-Attached Memory Emulation discussed at](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo,
+[particularly IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines)
+is strongly recommended.
 
 The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a shared, global memory space.  This space can be accessed via mmap(2) and will behave just the the memory centric-computing on The Machine.
 
