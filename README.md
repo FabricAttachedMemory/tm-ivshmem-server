@@ -1,117 +1,69 @@
-# BETTER Emulation of Fabric-Attached Memory for The Machine
-
-Experience the developer environment of next year's hardware _today_.  
-The Machine from Hewlett Packard Enterprise prototype offers a new paradigm
-in memory-centric computing.  While the hardware won't be available until 2016, you can experiment with fabric-attached memory right now.
+# Extending Emulation of FAM for The Machine
 
 ## Description
 
-This repo delivers a server that extends
-[Fabric-Attached Memory Emulation](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo, [particularly  IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines)
+This repo delivers a server that enhances [Fabric-Attached Memory Emulation](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo, [particularly  IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines)
 is strongly recommended.
 
-This server was originally written by Cam McDonnell as part of a larger exerciser suite for IVSHMEM.  It's currently [hosted on Github[(https://github.com/cmacdonell/ivshmem-code/).  The Machine effort only uses the ivshmem-server branch of that repo, and that's what you see here.
+This server was originally written by Cam McDonnell as part of a larger exerciser suite for IVSHMEM.  
+It's currently [hosted on Github[(https://github.com/cmacdonell/ivshmem-code/).  
+The Machine effort only uses the ivshmem-server directory of that repo, and that's what you see here.
 
-[The original ivshmem-server](https://github.com/cmacdonell/ivshmem-code/tree/master/ivshmem-server) communicates with a VM guest as directed by qemu command line options.  The server passed an open file descriptor representing a memory object, usually just a pre-allocated POSIX shared memory object.   tm-ivshmem-server (this repo) extends that by allowing a regular file to be used as backing store for the common IVSHMEM.  This allows two things:
+The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a shared, global memory space.  This space can be accessed via mmap(2) and will behave just the the memory centric-computing on The Machine.
+
+[The original ivshmem-server](https://github.com/cmacdonell/ivshmem-code/tree/master/ivshmem-server) communicates with a VM guest as directed by qemu command line options.  The server passes an open file descriptor representing a memory object, usually just a pre-allocated POSIX shared memory object.   tm-ivshmem-server (this repo) extends that by allowing a regular file to be used as backing store for the common IVSHMEM.  This allows two things:
 
 * True persistence of emulated global NVM (ie, power off of a laptop loses /dev/shm contents)
 * Backing store limited only by available file system space (instead of 1/2 physical RAM).
 
-The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a shared, global memory space.  This space can be accessed via mmap(2) and will behave just the the memory centric-computing on The Machine.
+As of QEMU 2.5, the test suite (and in particular, the ivshmem-server) has been subsumed into the QEMU project.
+Many things have changed in that version of ivshmem-server.  Patches will be submitted to the project to add 
+the regular-file capabilities discussed here.   This version of the server will work with the first
+connection of a QEMU >= 2.5 guest, but subsequent connections will fail.
 
 ## Setup and Execution
 
-The emulation configurator script, *emulation_configure.bash*, is written for Debian 8.x (Jessie/stable).  It should have the packages necessary for x86_64 virtual machines: qemu-system-x86_64 and libvirtd-bin should bring in everything else.  You also need the vmdebootstrap package.
+This section is mostly a copy of the original README, modified to reflect new options.
 
-After cloning this repo, run the script; it takes the desired number of VMs as its sole argument.  Several of the commands in the script must be run as root; you can run the entire script as root (or sudo).  You can also run the script as a normal user: all necessary commands are run internally under "sudo".
+This server is only supported on Linux.
 
-Several environment variables can be set (or exported first) that affect the operation of emulation_configure.bash:
+To use the shared memory server, first compile it.  Running 'make' should
+accomplish this.  An executable named 'ivshmem_server' will be built.
 
-| Variable | Purpose | Default |
-|----------|---------|---------|
-| ARTDIR | All resulting artifacts are located here.  A size check is done to ensure there's enough space.  If that check fails, either free up space or set ARTDIR to another directory. | /tmp |
-| MIRROR | The script builds VM images by pulling packages from Debian repo. | http://ftp.us.debian.org/debian |
-| PROXY | Any proxy needed to reach $MIRROR. | not set |
-| VERBOSE |Normally the script is fairly "quiet", only emitting cursory progress messages.  If VERBOSE set to any value (like "yes"), step-by-step operations are sent to stdout and the file $ARTDIR/fabric_emulation.log | not set |
+to display the options run:
 
-These variables must be seen in the script's environment so use the "-E"
-command if invoking sudo directly:
+./ivshmem_server -h
 
-    $ export MIRROR=http://a.b.com/debian
-    $ export VERBOSE=yes
-    $ emulation_configure.bash n
+### Options
+-------
 
-works, as well as
+    -d	
+    	daemonize (instead of running in the foreground)
 
-    $ sudo -E emulation_configure.bash n
+    -h  
+    	print help message
 
-or
+    -f	<path on host>
+    	Absolute pathname of a file to be used as true persistent backing store,
+	as opposed to a shared memory object that disappears on a reboot.
 
-    $ sudo VERBOSE=yes MIRROR=http://a.b.com/debian emulation_configure.bash n
+    -m <#>
+        size of the backing store in MBs (default: 1).  Multipliers are M, G, and T.
+	Optional if you're just reusing an existing object.
+	Shared memory objects are limited to half the size of your physical RAM.
+	Normal files can be up to several terabytes, depending on your host
+	processor, revision of QEMU (before 2.0 - 2.4), and available file system space.
 
-## Behind the scenes
+    -n <#>
+    	Number of MSI pseudo-interrupts to use in IV messaging.  Not germane to
+	shared pseudo-NVM.
 
-emulation_configure.bash performs the following actions:
+    -p <path on host>
+        Unix domain socket to listen on.  The qemu-kvm chardev needs to connect on
+        this socket. (default: '/tmp/ivshmem_socket')
 
-1. Validates the host environment, starting with execution as root or sudo.  While it doesn't explicitly limit its execution to Debian Jessie, it does check for commands that may not exist on other Debian variants.  Other things are checked like file space and internal consistency.
-1. Creates a libvirt virtual bridged network called "fabric_emul" which
-  2. Provides DHCP services via dnsmasq
-  2. Links all emulated VM "nodes" together on an intranet (ala The Machine)
-  2. Uses NAT to connect the intranet to the host system's external network.
-1. Uses vmdebootstrap(1m) to create a new disk image (file) that serves as the template for each VM's file system.  This is the step that pulls from the Debian mirror (see MIRROR and PROXY above).  Most of the configuration is specified in the file fabric_emulation.vmd, with several options handled in the shell script.  This template file is a raw disk image yielding about eight gigabytes of file system space for a VM, more than enough for a non-graphical Linux development system.
-1. Copy the template image for each VM and customize it (hostname, /etc/hosts, /etc/resolv.conf, root and user "fabric").  The raw image is then converted to a qcow2 (copy-on-write) which shrinks its size down to 800 megabytes.  That may grow with use.
-1. Emits an invocation script which may be used to start all VMs.  That script is in $ARTDIR/fabric_emulation.bash.  The qemu commands contain stanzas necessary to create the IVSHMEM connectivity (see below).
+    -s <string>
+        POSIX shared object to create that is the shared memory (default: 'ivshmem')
 
-## Artifacts
-
-The following files will be created in $ARTDIR after a successful run.  Note: ARTDIR was originally TMPDIR, but that variable is suppressed by glibc on setuid programs which breaks under certain uses of sudo.
-
-| Artifact | Description |
-|----------|-------------|
-| fabricN.qcow2 | The disk image file for VM "node" N |
-| fabric_emulation.bash | Shell script to start all VM "nodes" |
-| fabric_emulation.log | Trace file of all steps by emulation_configure.bash |
-| fabric_template.img |	Pristine (un-customized) file-system image of vmdebootstrap.  This is a partitioned disk image and is not needed to run the VMs. |
-| fabric_template.tar |	Tarball of the root filesystem on fabric_template.img |
-
-## VM Guest Environment
-
-The root password is "aresquare".  A single normal user also exists, "fabric", with password "rocks", and is enabled as a full "sudo" account.
-
-Networking should be active on eth0.  /etc/hosts is set up for "nodes" fabric1 through fabric4.  The host system is known by its own hostname and the name "vmhost".   sshd is set up on every node for inter-node access as well as access from the host.
-
-"apt" and "aptitude" are configured to allow package installation and updates per the MIRROR and PROXY settings above.
-
-A reasonable development environment (gcc, make) is available.  This can be used to compile the simple "hello world" program found in the home directory of user "fabric".
-
-## IVSHMEM connectivity between all VMs
-
-Memory-centric computing in a The Machine is done used via memory accesses similar to those used with legacy memory-mapping.  Emulation provides a resource for such [user space programming via IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines).  A typical QEMU invocation line looks something like this: 
-
-    qemu-system-x86_64 -enable-kvm \
-        -net bridge,br=fabric_em,helper=/usr/lib/qemu/qemu-bridge-helper \
-        -net nic,macaddr=52:54:48:50:45:02,model=virtio \
-        -device ivshmem,shm=fabric_em,size=1024 \
-        /tmp/fabric2.qcow2
-
-Fabric-Attached Memory Emulation is achieved via the stanza
-
-    -device ivshmem,shm=fabric_emulation,size=1024
-
-On the VM side, this creates a pseudo-PCI device with a memory base address register (BAR) of size 1024 megabytes (one gigabyte).  It can be seen in detail via "lspci -vv".  This is presented to the VM kernel as "live", unmapped physical address space.
-
-The VM "physical" address space is backed on the host by a POSIX shared memory object.  This object is visible on the host in the file /dev/shm/fabric_em.  Anything done to the address space on the VM is reflected in the file on the host, and vice verse.
-
-Finally, all VMs (i.e, "nodes") are started with the same IVSHMEM stanza.  Thus they all share that pseudo-physical memory space.  That is the essence of fabric-attached memory emulation.
-
-## Hello, world!
-
-As the IVSHMEM address space is physical and unmapped, a kernel driver is needed to access it.   Fortunately there's a shortcut in the QEMU world.  The IVSHMEM mechanism also makes a file available on the VM side under /proc/bus/pci.   In general the apparent PCI address might vary between VMs, but since they all use a simple stanza, all VMs see that file at
-
-    /sys/bus/pci/devices/0000:00:04.0/resource2
-
-If a user-space program on the VM opens and memory-maps this file via mmap(2), memory accesses go to the pseudo-physical address space shared across all VMs.  This file can only be memory-mapped on the VM; read and write is not implemented.To simplify the program, the resource2 file is symlinked at /mnt/fabric_emulation.
-
-A simple demo program is copied to the home directory of the "fabric" user on each VM.  Compile it on one node and run it (using sudo to execute).  Then go to the host VM and "cat /dev/shmem/fabric_em".  You should see uname output from the node.  Those same contents will appear to all other nodes, too (if you write a program that loads from the shared space instead of storing to it).
-
-What about syncing between nodes?  That is left as an exercise to the reader, as it would be in any setup involving a shared global resource.  Have fun :-)
+    -t
+        Truncate the object to the (new) size given in -m.
