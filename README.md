@@ -52,7 +52,7 @@ to display the options run:
 	Optional if you're just reusing an existing object.
 	Shared memory objects are limited to half the size of your physical RAM.
 	Normal files can be up to several terabytes, depending on your host
-	processor, revision of QEMU (before 2.0 - 2.4), and available file system space.
+	processor, revision of QEMU (1.9 - 2.4), and available file system space.
 
     -n <#>
     	Number of MSI pseudo-interrupts to use in IV messaging.  Not germane to
@@ -68,14 +68,26 @@ to display the options run:
     -t
         Truncate the object to the (new) size given in -m.
 
+## Configuring QEMU
+
+QEMU invocation for the default [(POSIX shmem) mode of IVSHMEM is discussed here]( 
+https://github.com/FabricAttachedMemory/Emulation/blob/master/README.md#ivshmem-connectivity-between-all-vms).
+Fabric-Attached Memory Emulation is achieved via the stanza
+
+    -device ivshmem,shm=fabric_emulation,size=1024
+    
+Naturally, connecting to tm_ivshmem_server is a little more difficult.  QEMU needs the UNIX-domain socket and the size used by tm_ivshmem_server (-p and -m options).  As a QEMU invocation stanza, that becomes
+
+    
+
 ## Files
 
 | Filename | Description |
 |----------|-------------|
 | COPYING | License file (GPLv2) |
 | Makefile | The usual suspect |
-| node05.xml.file | The output from "virsh dumpxml" for a VM named node05.
-This guest is configured to use the regular file mode of IVSHMEM and needs tm__ivshmem_server running first. |
-| send_scm.[ch] | Support routines for delivering messages across the socket | 
+| node05.xml.file | The output from "virsh dumpxml" for a VM named node05.  This guest is configured to use the regular file mode of IVSHMEM and needs tm__ivshmem_server running first. |
+| node05.xml.shm | The output from "virsh dumpxml" for a VM named node05.  This guest is configured to use the default mode of IVSHMEM and does not need tm__ivshmem_server at all. |
+| send_scm.[ch] | Support routines for exchanging messages across the socket | 
 | tm_ivshmem_server.c | The core of the server, all mods are in here |
 
