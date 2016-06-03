@@ -2,37 +2,41 @@
 
 ## Description
 
-This repo delivers a server that enhances [Fabric-Attached Memory Emulation](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo, [particularly  IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines)
-is strongly recommended.
+This repo delivers an auxiliary daemon that enhances [Fabric-Attached Memory Emulation](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo, [particularly  IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines) is strongly recommended.
 
-This server was originally written by Cam McDonnell as part of a larger exerciser suite for IVSHMEM.  
+This daemon was originally written by Cam McDonnell as part of a larger exercise suite for IVSHMEM version circa 2.0.
 It's currently [hosted on Github[(https://github.com/cmacdonell/ivshmem-code/).  
 The Machine effort only uses the ivshmem-server directory of that repo, and that's what you see here.
 
-The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a shared, global memory space.  This space can be accessed via mmap(2) and will behave just the the memory centric-computing on The Machine.
+The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a shared, global memory space.  This space can be accessed via mmap(2) and will behave almost identically to the the memory centric-computing on The Machine.
 
 [The original ivshmem-server](https://github.com/cmacdonell/ivshmem-code/tree/master/ivshmem-server) communicates with a VM guest as directed by qemu command line options.  The server passes an open file descriptor representing a memory object, usually just a pre-allocated POSIX shared memory object.   tm-ivshmem-server (this repo) extends that by allowing a regular file to be used as backing store for the common IVSHMEM.  This allows two things:
 
 * True persistence of emulated global NVM (ie, power off of a laptop loses /dev/shm contents)
 * Backing store limited only by available file system space (instead of 1/2 physical RAM).
 
-As of QEMU 2.5, the test suite (and in particular, the ivshmem-server) has been subsumed into the QEMU project.
-Many things have changed in that version of ivshmem-server.  Patches will be submitted to the project to add 
-the regular-file capabilities discussed here.   This version of the server will work with the first
-connection of a QEMU >= 2.5 guest, but subsequent connections will fail.
+### QEMU versions
+
+tm_ivshmem_server will work with QEMU versions up to 2.4.  Additinally, 
+starting at 2.4, QEMU gained the ability to access a file by name, rather than
+needing an fd as passed in by tm_ivshmem_server.
+[More details can be seen in the QEMU changelog](https://github.com/qemu/qemu/commit/7d4f4bdaf785dfe9fc41b06f85cc9aaf1b1474ee).
+
+As of QEMU 2.5, the test suite (and in particular, the ivshmem-server) has been subsumed into the QEMU project.  It may be deprecated in the future as the features are being migrated to new pseudo-devices.
+
+Many things changed in the 2.5-native version of ivshmem-server and it's QEMU client code.  This version of tm-ivshmem-server will work with the first connection of a QEMU >= 2.5 guest, but subsequent connections will fail.
+
+Patches may be submitted to the QEMU project to add the regular-file capabilities discussed here.
 
 ## Setup and Execution
 
 This section is mostly a copy of the original README, modified to reflect new options.
 
-This server is only supported on Linux.
+This server is only supported on Linux.  To use the shared memory server, first compile it.  Running 'make' should accomplish this.  An executable named 'tm_ivshmem_server' will be built.
 
-To use the shared memory server, first compile it.  Running 'make' should
-accomplish this.  An executable named 'ivshmem_server' will be built.
+To display the options run:
 
-to display the options run:
-
-./ivshmem_server -h
+./tm_ivshmem_server -h
 
 ### Options
 -------
@@ -66,7 +70,8 @@ to display the options run:
         POSIX shared object to create that is the shared memory (default: 'ivshmem')
 
     -t
-        Truncate the object to the (new) size given in -m.
+        Truncate the object to the (new) size given in -m.  Not needed for an
+        existing object of acceptable size.
 
 ## Configuring QEMU
 

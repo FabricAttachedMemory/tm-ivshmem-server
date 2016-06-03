@@ -2,29 +2,31 @@
  * A stand-alone shared memory server for inter-VM shared memory for KVM
 */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <errno.h>
+#include <signal.h>
+#include <stdbool.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <unistd.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/select.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <signal.h>
 #include <sys/signalfd.h>
-#include <stdbool.h>
 #include "send_scm.h"
 
 #define DEFAULT_SOCK_PATH "/tmp/ivshmem_socket"
 #define DEFAULT_SHM_OBJ "ivshmem"
 
 #define DEBUG 1
+
+#define S_IRW_ALL (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
 
 typedef struct server_state {
     vmguest_t *live_vms;
@@ -42,7 +44,7 @@ typedef struct server_state {
     bool daemonize, truncate;
 } server_state_t;
 
-void usage(char const *prg) {
+void usage_die(char const *prg) {
     fprintf(stderr,
     	    "usage: %s [-d] [-h] [-p <unix socket>] [-f <file> | -s <shmobj>]"
             "[-m XXXX[M|G|T]] [-n X] [-t]\n",
@@ -54,7 +56,7 @@ void usage(char const *prg) {
     fprintf(stderr, "-n X	number of MSI vectors\n");
     fprintf(stderr, "-s	name	use Posix shared memory as backing store\n");
     fprintf(stderr, "-t		with -f and -m: truncate file to given size\n");
-
+    exit(1);
 }
 
 void add_new_guest(server_state_t * s) {
@@ -148,7 +150,7 @@ void create_listening_socket(server_state_t * s) {
         perror("listen() failed");
         exit(1);
     }
-    chmod(local.sun_path, 0666);
+    chmod(local.sun_path, S_IRW_ALL);
     s->maxfd = s->conn_socket;
 
     return;
@@ -178,8 +180,7 @@ server_state_t * parse_args(int argc, char **argv) {
 
     case 'h':
     default:
-            usage(argv[0]);
-	    exit(1);
+            usage_die(argv[0]);
 
     case 'm':			// size of shared memory object
         {
@@ -203,8 +204,7 @@ server_state_t * parse_args(int argc, char **argv) {
 
             default:
                     fprintf(stderr, "invalid multiplier: %s\n", optarg);
-		    usage(argv[0]);
-                    exit(1);
+		    usage_die(argv[0]);
             }
             s->shm_size = value;
             break;
@@ -231,8 +231,7 @@ server_state_t * parse_args(int argc, char **argv) {
 
     if (s->shmobj && s->filepath) {
     	fprintf(stderr, "Need exactly one of -f | -s\n");
-	usage(argv[0]);
-	exit(1);
+	usage_die(argv[0]);
     }
 
     // At 1TB, lspci -> Region 2: Memory at <ignored> (64-bit, prefetchable)
@@ -243,18 +242,14 @@ server_state_t * parse_args(int argc, char **argv) {
     if (s->shm_size && (
     		1 << 20 > s->shm_size || s->shm_size > 16L * (1L << 40))) {
     	fprintf(stderr, "Limits: 1M <= size <= 16T\n");
-	usage(argv[0]);
-	exit(1);
+	usage_die(argv[0]);
     }
 
-#if 0
-    // Must be power of 2 (ie, only 1 bit may be set)
-    if (!(!(s->shm_size & (s->shm_size - 1)))) {
+    // shmem must be power of 2 (ie, only 1 bit may be set)
+    if (s->shmobj && (!(!(s->shm_size & (s->shm_size - 1))))) {
     	fprintf(stderr, "%lu is not a power of 2\n", s->shm_size);
-	usage(argv[0]);
-	exit(1);
+	usage_die(argv[0]);
     }
-#endif
 
     return s;	// needs to be free'd
 }
@@ -310,7 +305,7 @@ void open_backing_store(server_state_t *s) {
    
     umask_old = umask(0);
     if (s->shmobj) {		// System preserves file on graceless exit
-    	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, 0666)) < 0)
+    	if ((s->shm_fd = shm_open(s->shmobj, O_CREAT|O_RDWR, S_IRW_ALL)) < 0)
     	{
             fprintf(stderr, "shm_open(%s) failed: %s\n",
 	    	s->shmobj, strerror(errno));
@@ -319,7 +314,7 @@ void open_backing_store(server_state_t *s) {
     } else if (s->filepath) {	// but keep using shm_fd
 	sigset_t mask;
 
-    	if ((s->shm_fd = open(s->filepath, O_CREAT|O_RDWR, 0666)) < 0)
+    	if ((s->shm_fd = open(s->filepath, O_CREAT|O_RDWR, S_IRW_ALL)) < 0)
     	{
             fprintf(stderr, "open(%s) failed: %s\n",
 	    	s->filepath, strerror(errno));
