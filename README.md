@@ -5,8 +5,7 @@
 This repo delivers an auxiliary daemon that enhances [Fabric-Attached Memory Emulation](https://github.com/FabricAttachedMemory/Emulation/).  Familiarity with the concepts in that repo, [particularly  IVSHMEM](https://github.com/FabricAttachedMemory/Emulation/wiki/Emulation-via-Virtual-Machines) is strongly recommended.
 
 This daemon was originally written by Cam McDonnell as part of a larger exercise suite for IVSHMEM version circa 2.0.
-It's currently [hosted on Github[(https://github.com/cmacdonell/ivshmem-code/).  
-The Machine effort only uses the ivshmem-server directory of that repo, and that's what you see here.
+It's currently [hosted on Github[(https://github.com/cmacdonell/ivshmem-code/).  The Machine effort only uses the ivshmem-server directory of that repo, and that's what you see here.
 
 The emulation employs QEMU virtual machines performing the role of "nodes" in The Machine.  Inter-Virtual Machine Shared Memory (IVSHMEM) is configured across all the "nodes" so they see a physical memory area shared between them.  This space behaves almost identically to the the memory-centric computing on The Machine.
 
@@ -72,6 +71,8 @@ To display the options run:
 
 ## Configuring QEMU
 
+### Versions 1.9 - 2.4
+
 QEMU invocation for the default [(POSIX shmem) mode of IVSHMEM is discussed here]( 
 https://github.com/FabricAttachedMemory/Emulation/blob/master/README.md#ivshmem-connectivity-between-all-vms).
 Fabric-Attached Memory Emulation is achieved via the stanza
@@ -81,6 +82,24 @@ Fabric-Attached Memory Emulation is achieved via the stanza
 Naturally, connecting to tm_ivshmem_server is a little more complex.  QEMU needs the UNIX-domain socket and the size used by tm_ivshmem_server (-p and -m options).  The QEMU invocation stanza comes as two parts:
 
     -chardev socket,path=/var/run/ivshmem.sock,id=GlobalNVM -device ivshmem,chardev=GlobalNVM,size=64G 
+
+### Version 2.5
+
+tm_ivshmem_server is no longer needed for IVHSHMEM backed by a regular file.
+The backing file should be created before QEMU invocation.  For a 16G file,
+something similar to this will work:
+
+	$ fallocate -l 16G /var/lib/GlobalNVM
+
+Fabric-Attached Memory Emulation is achieved via the stanza pair
+
+	-object memory-backend-file,size=16G,mem-path=/var/tmp/GlobalNVM,id=GlobalNVM,share=on
+	-device ivshmem,x-memdev=GlobalNVM
+
+### Version 2.6
+
+The format is highly similar to that of QEMU 2.5.  The "x-memdev" keyword
+is now just "memdev".
 
 ## Files
 
