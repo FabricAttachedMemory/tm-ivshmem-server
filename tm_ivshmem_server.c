@@ -239,16 +239,17 @@ server_state_t * parse_args(int argc, char **argv) {
     // to hotadd (struct page and vmemmap).  QEMU needs patch to go beyond
     // 40-bit addressing (> mmap() max of 512G).
 
-    if (s->shm_size && (
-    		1 << 20 > s->shm_size || s->shm_size > 16L * (1L << 40))) {
-    	fprintf(stderr, "Limits: 1M <= size <= 16T\n");
-	usage_die(argv[0]);
-    }
+    if (s->shm_size) {
+	if (1 << 20 > s->shm_size || s->shm_size > 16L * (1L << 40))) {
+	    fprintf(stderr, "Limits: 1M <= size <= 16T\n");
+	    usage_die(argv[0]);
+	}
 
-    // shmem must be power of 2 (ie, only 1 bit may be set)
-    if (s->shmobj && (!(!(s->shm_size & (s->shm_size - 1))))) {
-    	fprintf(stderr, "%lu is not a power of 2\n", s->shm_size);
-	usage_die(argv[0]);
+    	// shmem must be power of 2 (ie, only 1 bit may be set)
+	if (s->shmobj && (!(!(s->shm_size & (s->shm_size - 1))))) {
+	    fprintf(stderr, "%lu is not a power of 2\n", s->shm_size);
+	    usage_die(argv[0]);
+	}
     }
 
     return s;	// needs to be free'd
