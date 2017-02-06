@@ -98,8 +98,7 @@ Fabric-Attached Memory Emulation is achieved via the stanza pair
 
 ### Version 2.6
 
-The format is highly similar to that of QEMU 2.5.  The "x-memdev" keyword
-is now just "memdev".
+The format is highly similar to that of QEMU 2.5.  In the "-device" stanza the "ivshmem" keyword is now "ivshmem-plain" and the "x-memdev" keyword is now just "memdev".
 
 ## Files
 
