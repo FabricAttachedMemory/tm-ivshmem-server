@@ -240,7 +240,7 @@ server_state_t * parse_args(int argc, char **argv) {
     // 40-bit addressing (> mmap() max of 512G).
 
     if (s->shm_size) {
-	if (1 << 20 > s->shm_size || s->shm_size > 16L * (1L << 40))) {
+	if (1 << 20 > s->shm_size || s->shm_size > 16L * (1L << 40)) {
 	    fprintf(stderr, "Limits: 1M <= size <= 16T\n");
 	    usage_die(argv[0]);
 	}
@@ -297,12 +297,16 @@ void open_backing_store(server_state_t *s) {
     struct stat buf;
     mode_t umask_old;
 
+    if (!s->shm_size) {	// Maybe just using the interrupt/messaging
+	printf("Shared object size == 0, no backing store used\n");
+        return;
+    }
+
     if (!(s->shmobj || s->filepath))
         s->shmobj = strdup(DEFAULT_SHM_OBJ);
 
     printf("shared object: %s\n", s->shmobj ? s->shmobj : s->filepath);
-    if (s->shm_size)
-    	printf("requested object size: %lu (bytes)\n", s->shm_size);
+    printf("requested object size: %lu (bytes)\n", s->shm_size);
    
     umask_old = umask(0);
     if (s->shmobj) {		// System preserves file on graceless exit
